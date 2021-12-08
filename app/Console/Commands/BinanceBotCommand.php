@@ -6,47 +6,26 @@ use App\BinanceBot\BinanceBot;
 use App\BinanceBot\BinanceCandleTick;
 use App\BinanceBot\BinanceCoinMyHistoryOperation;
 use App\BinanceBot\BinanceOrder;
+use DateTime;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 
 final class BinanceBotCommand extends Command
 {
-    protected $signature = 'binance:bot {coin}
-         {--value : Retrieve current value for coin }
-         {--depth : Retrieve depth for coin }
-         {--openOrders : Retrieve openOrders for coin }
-         {--candleTicks : Retrieve candleTicks for coin }
-         {--orders : Retrieve orders for coin }
-         {--history : Retrieve history for coin }
-
-         {--analyze : Analyze data in a interval of candleTicks }
-         {--analyzeStartDate= : Analyze start date }
-         {--analyzeEndDate= : Analyze end date }
-         {--analyzeMinMaxPercentChange= : Percent change warning for analyze in MinMax}
-         {--analyzeLastTickPercentChange= : LastPercent change warning for analyze in LasTick }
-         {--analyzeCandleTickInterval= : Interval data to retrieve in candles (5m, 15m, 4h...) }
-         {--analyzeMinMaxPercentVerbose= : Verbose mode for MinMaxPercent data }
-         {--analyzeLastTickPercentVerbose= : Verbose mode for LastTickPercent data }
-
-         {--realTime : Active realTime mode }
-         {--realTimeMinutesAgo= : Minutes ago for starTime parameter in realTime mode }
-         {--realTimeMinMaxPercentVerbose= : Verbose mode for MinMaxPercent data }
-         {--realTimeLastTickPercentVerbose= : Verbose mode for LastTickPercent data }
-         {--realTimeMinMaxPercentChangeWarning= : Percent of change for warnings in realTime mode }
-         {--realTimeCandleTickInterval= : Interval data to retrieve in candles (5m, 15m, 4h...) }
-         {--realTimeLastTickPercentChangeWarning= : Percent change between last tick and previous }
-    ';
+    protected $signature = 'binance:bot {coin}';
 
     protected $description = 'Binance Bot Tool';
 
     private BinanceBot $api;
-    private const REAL_TIME_WAIT_SECONDS = 4;
-    private const DEFAULT_PERCENT_CHANGE_WARNING = 5;
+
+    private const REAL_TIME_WAIT_SECONDS = 2;
+    private const BINANCE_MAX_LIMIT = 1000;
 
     public function __construct()
     {
-        $this->api = new BinanceBot();
         parent::__construct();
+
+        $this->api = new BinanceBot(config('binance-rzbot'));
     }
 
     public function handle()
@@ -58,14 +37,15 @@ final class BinanceBotCommand extends Command
         $this->history($coin);
         $this->depth($coin);
         $this->openOrders();
-        $this->candleTicks($coin);
         $this->realTime($coin);
         $this->analyze($coin);
     }
 
     public function value(string $coin): void
     {
-        if ($this->option("value")) {
+        $config = $this->api->config('value');
+
+        if ($config['active']) {
             $this->info(sprintf("Value for %s: %s", $coin, $this->api->price($coin)));
             $this->info(sprintf("Value 24h ago for %s: %s", $coin, $this->api->prevDayPrice($coin)->getPriceChangePercent()));
         }
@@ -73,7 +53,9 @@ final class BinanceBotCommand extends Command
 
     public function orders(string $coin): void
     {
-        if ($this->option("orders")) {
+        $config = $this->api->config('orders');
+
+        if ($config['active']) {
             $orders = $this->api->orders($coin);
             foreach ($orders as $order) {
                 /* @var $order BinanceOrder */
@@ -84,8 +66,10 @@ final class BinanceBotCommand extends Command
 
     public function history(string $coin): void
     {
-        if ($this->option("history")) {
-            $operations = $this->historyOperations($coin);
+        $config = $this->api->config('history');
+
+        if ($config['active']) {
+            $operations = $this->api->historyOperations($coin);
             foreach ($operations as $operation) {
                 /* @var $operation BinanceCoinMyHistoryOperation */
                 $this->info(sprintf("Operation DONE: %s", $operation->getSymbol()));
@@ -95,7 +79,9 @@ final class BinanceBotCommand extends Command
 
     public function depth(string $coin): void
     {
-        if ($this->option("depth")) {
+        $config = $this->api->config('depth');
+
+        if ($config['active']) {
             $depth = $this->api->depth($coin);
             $this->info(sprintf("DEPTH: Bids(%s) / Asks(%s)", $depth->sumBids(), $depth->sumAsks()));
         }
@@ -103,7 +89,9 @@ final class BinanceBotCommand extends Command
 
     public function openOrders(): void
     {
-        if ($this->option("openOrders")) {
+        $config = $this->api->config('openOrders');
+
+        if ($config['active']) {
             $openOrders = $this->api->openOrders();
             foreach ($openOrders as $preOrder) {
                 /* @var $preOrder BinanceOrder */
@@ -112,223 +100,129 @@ final class BinanceBotCommand extends Command
         }
     }
 
-    public function candleTicks(string $coin): void
-    {
-        if ($this->option("candleTicks")) {
-            $candleTicks = $this->api->candleTicks(
-                $coin,
-                strtotime($this->option('realTimeCandleTickInterval')),
-                strtotime("-" .$this->option('realTimeMinutesAgo') . " minutes"),
-                time()
-            );
-            foreach ($candleTicks as $tick) {
-                /* @var $tick BinanceCandleTick */
-                $this->info(sprintf("TICK: Open: %s, Close: %s",
-                    $tick->getOpen(),
-                    $tick->getClose()
-                ));
-            }
-        }
-    }
-
     private function realTime(string $coin)
     {
-        if ($this->option("realTime")) {
+        $this->info("Starting realTime");
+
+        $config = $this->api->config('realTime');
+
+        if ($config['active']) {
             while (true) {
+                $output = "";
                 $candleTicks = $this->api->candleTicks(
                     $coin,
-                    $this->option('realTimeCandleTickInterval'),
-                    strtotime("-" .$this->option('realTimeMinutesAgo') . " minutes"),
+                    $config['options']['realTimeCandleTickInterval'],
+                    strtotime("-" . $config['options']['realTimeMinutesAgo'] . " minutes"),
                     time()
                 );
 
-                if ($this->option('realTimeMinMaxPercentVerbose')) {
-                    $this->searchMinMaxPercentChangeWarnings(
-                        $coin,
+                if ($config['options']['realTimeMinMaxPercentVerbose']) {
+                    $output.= $this->api->searchMinMaxPercentChangeWarnings(
                         $candleTicks,
-                        $this->option('realTimeMinMaxPercentChangeWarning')
+                        $config['options']['realTimeMinMaxPercentChangeWarning']
                     );
                 }
 
-                if ($this->option('realTimeLastTickPercentVerbose')) {
-                    $this->searchLastPreviousPercentChangeWarnings(
+                if ($config['options']['realTimeLastTickPercentVerbose']) {
+                    $output.= $this->api->searchLastPreviousPercentChangeWarnings(
                         $coin,
                         $candleTicks,
-                        $this->option('realTimeLastTickPercentChangeWarning')
+                        $config['options']['realTimeLastTickPercentChangeWarning'],
+                        $config['options']['realTimeLastTickProfitPercentage'],
+                        $config['options']['realTimeBinanceCommissionForTrading']
                     );
                 }
+
+                $this->line(sprintf("[%s] %s %s",
+                    $this->api->getCurrentTime(),
+                    $coin,
+                    $output
+                ));
 
                 sleep(self::REAL_TIME_WAIT_SECONDS);
             }
         }
     }
 
-    private function searchMinMaxPercentChangeWarnings(string $coin, array $historyCandleTicks, float $percentChangeWarning)
-    {
-        $minValue = PHP_FLOAT_MAX;
-        $maxValue = 0;
-
-        $minTime = null;
-        $maxTime = null;
-
-        $minRangeDate = PHP_INT_MAX;
-        foreach ($historyCandleTicks as $tick) {
-            /* @var $tick BinanceCandleTick */
-            $oldMax = $maxValue;
-            $oldMin = $minValue;
-            $maxValue = max($maxValue, $tick->getClose());
-            $minValue = min($minValue, $tick->getClose());
-
-            $minRangeDate = min($minRangeDate, $tick->getCloseTime());
-
-            if ($oldMax !== $maxValue)  {
-                $maxTime = $tick->getCloseTime();
-                $maxTime = date('m-d h:i:s', $maxTime / 1000);
-            }
-
-            if ($oldMin !== $minValue)  {
-                $minTime = $tick->getCloseTime();
-                $minTime = date('m-d h:i:s', $minTime / 1000);
-            }
-        }
-
-        $percentageChange = $this->api->percentageChange($minValue, $maxValue);
-
-        $msg = sprintf("[%s] %s - Range Min[%s]: %s / Range Max[%s]: %s = %s%%",
-            $this->getCurrentTime(),
-            $coin,
-            $minTime,
-            $this->api->formatScientistToFloat($minValue, 8),
-            $maxTime,
-            $this->api->formatScientistToFloat($maxValue, 8),
-            $percentageChange
-        );
-
-        if (abs($percentageChange) > $percentChangeWarning) {
-            $this->warn($msg);
-        } else {
-            $this->info($msg);
-        }
-    }
-
-    private function searchLastPreviousPercentChangeWarnings(string $coin, array $historyCandleTicks, float $percentageChangeWarning)
-    {
-        /* @var $lasTick BinanceCandleTick */
-        $lasTick = end($historyCandleTicks);
-        /* @var $previousTick BinanceCandleTick */
-        $previousTick = array_slice($historyCandleTicks, -2, 1)[0];
-
-        $percentageChange = $this->api->percentageChange($lasTick->getClose(), $previousTick->getClose());
-
-        $direction = null;
-        if ($percentageChange < 0) {
-            $direction = "UP";
-        } elseif ($percentageChange > 0) {
-            $direction = "DOWN";
-        }
-
-        $msg = sprintf("[%s] %s - Last Tick [%s]: %s / Previous Tick [%s]: %s = %s%% %s",
-            $this->getCurrentTime(),
-            $coin,
-            date('Y-m-d h:i:s', $this->api->formatTimestampSeconds($lasTick->getCloseTime())),
-            $this->api->formatScientistToFloat($lasTick->getClose(), 8),
-            date('Y-m-d h:i:s', $this->api->formatTimestampSeconds($previousTick->getCloseTime())),
-            $this->api->formatScientistToFloat($previousTick->getClose(), 8),
-            $percentageChange,
-            $direction
-        );
-
-        if (abs($percentageChange) > $percentageChangeWarning) {
-            $this->warn($msg);
-
-            if ($direction === "DOWN" && $this->api->automaticOrder()->canBuy()) {
-                $this->api->automaticOrder()->buy(
-                    $coin,
-                    time(),
-                    $this->api->formatScientistToFloat($previousTick->getClose(), 8),
-                    1
-                );
-            }
-
-        } else {
-            $this->info($msg);
-        }
-
-        if ($this->api->automaticOrder()->canSell()) {
-            $desiredProfitPercent = 0.005;
-
-            $profit = $this->api->formatScientistToFloat(
-                $this->api->automaticOrder()->percentage(
-                    $desiredProfitPercent,
-                    $this->api->automaticOrder()->buyValue()
-                ),8
-            );
-
-            if ($this->api->automaticOrder()->isProfitable($previousTick->getClose(), $desiredProfitPercent)) {
-                $this->api->automaticOrder()->sell(
-                    time(),
-                    $this->api->formatScientistToFloat($previousTick->getClose(), 8)
-                );
-            }
-        }
-    }
-
-    private function getCurrentTime(): string
-    {
-        return date('Y-m-d h:i:s', time());
-    }
-
     private function analyze(string $coin)
     {
-        $tsFrom = strtotime($this->option('analyzeStartDate'));
-        $tsTo = strtotime($this->option('analyzeEndDate'));
+        $this->info("Starting analyze");
 
-        $this->info(sprintf("Analyzing from %s to %s",
+        $config = $this->api->config('analyze');
+
+        $tsFrom = strtotime($config['options']['analyzeStartDate']);
+        $tsTo = strtotime($config['options']['analyzeEndDate']);
+
+        $fromDatetime = new DateTime(date("Y-m-d H:i:s",$tsFrom));
+        $toDateTime = new DateTime(date("Y-m-d H:i:s", $tsTo));
+
+        $datesDiff = $toDateTime->diff($fromDatetime);
+
+        $minutes = $datesDiff->days * 24 * 60;
+        $minutes += $datesDiff->h * 60;
+        $minutes += $datesDiff->i;
+
+        if ($minutes > self::BINANCE_MAX_LIMIT) {
+            $this->error("Range max reached (1000)");
+            exit(-1);
+        }
+
+        $this->info(sprintf("Analyzing from %s to %s (minutes: %s)",
             date("Y-m-d H:i:s", $tsFrom),
-            date("Y-m-d H:i:s", $tsTo)
+            date("Y-m-d H:i:s", $tsTo),
+            $minutes
         ));
 
         $this->separator();
 
-        $tsCurrentEnd = $tsFrom;
+        $this->api->candleTicks(
+            $coin,
+            $config['options']['analyzeCandleTickInterval'],
+            $tsFrom,
+            $tsTo
+        );
 
-        while (true) {
-            $this->info(sprintf("Simulating from %s to %s",
-                date("Y-m-d H:i:s", $tsTo),
-                date("Y-m-d H:i:s", $tsCurrentEnd)
-            ));
+        $tsCurrentEnd = $tsFrom + 60 + 60;
 
-            $candleTicks = $this->api->candleTicks(
-                $coin,
-                $this->option('analyzeCandleTickInterval'),
-                $tsFrom,
-                $tsCurrentEnd
-            );
+        while ($tsCurrentEnd <= $tsTo+60) {
+            $output = "";
+            $candleTicks = $this->api->candleTicksCache($tsFrom, $tsCurrentEnd);
 
-            if ($this->option('analyzeMinMaxPercentVerbose')) {
-                $this->searchMinMaxPercentChangeWarnings(
-                    $coin,
+            if ($config['options']['analyzeMinMaxPercentVerbose']) {
+                $output.= $this->api->searchMinMaxPercentChangeWarnings(
                     $candleTicks,
-                    $this->option('analyzeMinMaxPercentChange', 1)
+                    $config['options']['analyzeMinMaxPercentChange']
                 );
             }
 
-            if ($this->option('analyzeLastTickPercentVerbose')) {
-                $this->searchLastPreviousPercentChangeWarnings(
+            if ($config['options']['analyzeLastTickPercentVerbose']) {
+                $output.= $this->api->searchLastPreviousPercentChangeWarnings(
                     $coin,
                     $candleTicks,
-                    $this->option('analyzeLastTickPercentChange', 1)
+                    $config['options']['analyzeLastTickPercentChange'],
+                    $config['options']['analyzeProfitPercentage'],
+                    $config['options']['analyzeBinanceCommissionForTrading']
                 );
             }
 
+            $this->line(sprintf("[%s] %s", $this->api->getCurrentTime(), $output));
             $tsCurrentEnd += 60;
-            sleep(self::REAL_TIME_WAIT_SECONDS);
+
+            usleep($config['options']['analyzeSleepTime'] * 1000000);
         }
+
+        $this->separator();
+
+        $this->line(sprintf("Total profit: %s (%s sells)",
+            $this->api->formatScientistToFloat($this->api->currentProfitSells(), 8),
+            $this->api->sellsCounter()
+        ));
+
     }
 
     private function separator()
     {
-        $this->info(str_repeat( "=", 15*3));
-    }
 
+        $this->info(str_repeat( "=", 80));
+    }
 }

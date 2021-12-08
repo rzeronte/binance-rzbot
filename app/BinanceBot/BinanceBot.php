@@ -3,32 +3,45 @@
 namespace App\BinanceBot;
 
 use Binance\API;
-use Illuminate\Support\Facades\Log;
+use Exception;
 use Throwable;
 
 class BinanceBot
 {
+    private array $config;
+
+
     private API $api;
     private array $prices;
     private array $bookPrices;
+
     private BinanceAutomaticOrder $automaticOrder;
+    private array $candleTicksCache;
+    private bool  $currentTendence;
+    private float $currentProfitSells;
+    private int $sellsCounter;
 
-    private const LIMIT_CANDLES = 500;
+    private const LIMIT_CANDLES = 1000;
 
-    public function __construct()
+    public function __construct(array $config)
     {
+        $this->config = $config;
+
         $this->api = new API(
             env('BINANCE_APP_KEY'),
             env('BINANCE_APP_SECRET')
         );
 
         $this->automaticOrder = new BinanceAutomaticOrder();
+        $this->currentTendence = 0;
+        $this->currentProfitSells = 0;
+        $this->sellsCounter = 0;
 
         try {
             $this->prices = $this->api->prices();
             $this->bookPrices = $this->api->bookPrices();
         } catch (Throwable $e) {
-            throw new \Exception($e->getMessage());
+            throw new Exception($e->getMessage());
         }
     }
 
@@ -46,6 +59,7 @@ class BinanceBot
             $this->formatTimestampMicroseconds($from),
             $this->formatTimestampMicroseconds($to)
         );
+
 
         $ticks = [];
         foreach ($candleTicks as $tick) {
@@ -65,6 +79,7 @@ class BinanceBot
                 $tick["ignored"]
             );
         }
+        $this->candleTicksCache = $ticks;
 
         return $ticks;
     }
@@ -178,7 +193,6 @@ class BinanceBot
                 $order["isWorking"],
                 $order["origQuoteOrderQty"],
             );
-
         }
         return $orders;
     }
@@ -243,4 +257,170 @@ class BinanceBot
     {
         return $this->automaticOrder;
     }
+
+    public function candleTicksCache(string $tsFrom, string $tsTo): array
+    {
+        $tsFrom = $this->formatTimestampMicroseconds($tsFrom);
+        $tsTo = $this->formatTimestampMicroseconds($tsTo);
+
+        $ticks = [];
+        foreach($this->candleTicksCache as $tick) {
+            /* @var $tick BinanceCandleTick */
+            if ($tick->getOpenTime() >= $tsFrom && $tick->getCloseTime() <= $tsTo) {
+                $ticks[] = $tick;
+            }
+        }
+
+        return $ticks;
+    }
+
+    public function config(string $key): ?array
+    {
+        return $this->config[$key] ?? null;
+    }
+
+    public function searchMinMaxPercentChangeWarnings(
+        array $historyCandleTicks,
+        float $percentChangeWarning
+    ): string {
+        $minValue = PHP_FLOAT_MAX;
+        $maxValue = 0;
+
+        $minTime = null;
+        $maxTime = null;
+
+        $minRangeDate = PHP_INT_MAX;
+        foreach ($historyCandleTicks as $tick) {
+            /* @var $tick BinanceCandleTick */
+            $oldMax = $maxValue;
+            $oldMin = $minValue;
+            $maxValue = max($maxValue, $tick->getClose());
+            $minValue = min($minValue, $tick->getClose());
+
+            $minRangeDate = min($minRangeDate, $tick->getCloseTime());
+
+            if ($oldMax !== $maxValue)  {
+                $maxTime = $tick->getCloseTime();
+                $maxTime = date('m-d H:i:s', $maxTime / 1000);
+            }
+
+            if ($oldMin !== $minValue)  {
+                $minTime = $tick->getCloseTime();
+                $minTime = date('m-d H:i:s', $minTime / 1000);
+            }
+        }
+
+        $percentageChange = $this->percentageChange($minValue, $maxValue);
+
+        $direction = null;
+        if ($percentageChange < 0) {
+            $direction = "<options=bold;fg=black;bg=red> NEGATIVE </>";
+            $this->currentTendence = 0;
+        } elseif ($percentageChange > 0) {
+            $direction = "<options=bold;fg=black;bg=green> POSSITIVE </>";
+            $this->currentTendence = 1;
+        }
+
+        $msg = sprintf("Min/Max[%s/%s] - [%s/%s]: Change: %s - %s",
+            $minTime,
+            $maxTime,
+            $this->formatScientistToFloat($minValue, 8),
+            $this->formatScientistToFloat($maxValue, 8),
+            $percentageChange."%",
+            $direction
+        );
+
+        if (abs($percentageChange) > $percentChangeWarning) {
+            $msg = sprintf("<fg=blue>%s</>", $msg);
+        } else {
+            $msg = sprintf("<fg=white>%s</>", $msg);
+        }
+
+        return $msg;
+    }
+
+    public function searchLastPreviousPercentChangeWarnings(
+        string $coin,
+        array $historyCandleTicks,
+        float $percentageChangeWarning,
+        float $profitPercentForSell,
+        float $binanceCommisionForTrading
+    ): string
+    {
+        /* @var $lasTick BinanceCandleTick */
+        $lasTick = end($historyCandleTicks);
+        /* @var $previousTick BinanceCandleTick */
+
+        $previousTick = array_slice($historyCandleTicks, -2, 1)[0];
+
+        $percentageChange = $this->percentageChange($lasTick->getClose(), $previousTick->getClose());
+
+        $direction = null;
+        $directionText = "<options=bold;fg=black;bg=gray> EQUAL </>";
+        if ($percentageChange < 0) {
+            $direction = 1;
+            $directionText = "<options=bold;fg=black;bg=green> UP </>";
+        } elseif ($percentageChange > 0) {
+            $direction = 0;
+            $directionText = "<options=bold;fg=black;bg=red> DOWN </>";
+        }
+
+        $msg = sprintf(" | Prev [%s]: %s / Last [%s]: %s = %s %s",
+            date('Y-m-d H:i:s', $this->formatTimestampSeconds($previousTick->getCloseTime())),
+            $this->formatScientistToFloat($lasTick->getClose(), 8),
+            date('Y-m-d H:i:s', $this->formatTimestampSeconds($lasTick->getCloseTime())),
+            $this->formatScientistToFloat($previousTick->getClose(), 8),
+            str_pad($percentageChange . "%", 10),
+            $directionText,
+        );
+
+        if (abs($percentageChange) > $percentageChangeWarning) {
+            if (!$direction && $this->automaticOrder()->canBuy()) {
+                $this->automaticOrder()->buy(
+                    $coin,
+                    time(),
+                    $this->formatScientistToFloat($previousTick->getClose(), 8),
+                    1,
+                    $profitPercentForSell,
+                    $binanceCommisionForTrading
+                );
+
+                $msg .=" ====> BUY";
+            }
+            $msg = sprintf("<fg=magenta>%s</>", $msg);
+        } else {
+            $msg = sprintf("<fg=white>%s</>", $msg);
+        }
+
+        if ($this->automaticOrder()->canSell() ) {
+            if ($this->currentTendence) {
+                if ($this->automaticOrder()->isProfitable($previousTick->getClose(), $binanceCommisionForTrading)) {
+                    $this->currentProfitSells += $this->automaticOrder()->sell(
+                        time(),
+                        $this->formatScientistToFloat($previousTick->getClose(), 8)
+                    );
+                    $this->sellsCounter++;
+                    $msg .=" ====> SELL";
+                }
+            }
+        }
+
+        return $msg;
+    }
+
+    public function getCurrentTime(): string
+    {
+        return date('Y-m-d H:i:s', time());
+    }
+
+    public function currentProfitSells(): float
+    {
+        return $this->currentProfitSells;
+    }
+
+    public function sellsCounter(): int
+    {
+        return $this->sellsCounter;
+    }
+
 }

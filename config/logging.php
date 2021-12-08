@@ -53,7 +53,6 @@ return [
             'channels' => ['single'],
             'ignore_exceptions' => false,
         ],
-
         'single' => [
             'driver' => 'single',
             'path' => storage_path('logs/laravel.log'),
@@ -113,6 +112,17 @@ return [
         'emergency' => [
             'path' => storage_path('logs/laravel.log'),
         ],
+        'binance-operations' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/binance-operations.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
+        'binance-debug' => [
+            'driver' => 'single',
+            'path' => storage_path('logs/binance-debug.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+        ],
+
     ],
 
 ];

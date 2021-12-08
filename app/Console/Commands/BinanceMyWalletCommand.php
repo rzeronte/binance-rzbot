@@ -16,7 +16,7 @@ class BinanceMyWalletCommand extends Command
 
     public function __construct()
     {
-        $this->api = new BinanceBot();
+        $this->api = new BinanceBot(config('binance-rzbot'));
         parent::__construct();
     }
 
