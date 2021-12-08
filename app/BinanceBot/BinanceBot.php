@@ -4,6 +4,7 @@ namespace App\BinanceBot;
 
 use Binance\API;
 use Exception;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class BinanceBot
@@ -289,7 +290,10 @@ class BinanceBot
         $minTime = null;
         $maxTime = null;
 
-        $minRangeDate = PHP_INT_MAX;
+        /* @var $firstTick BinanceCandleTick */
+        $firstTick = $historyCandleTicks[0];
+
+        $tendence = -1;
         foreach ($historyCandleTicks as $tick) {
             /* @var $tick BinanceCandleTick */
             $oldMax = $maxValue;
@@ -297,28 +301,34 @@ class BinanceBot
             $maxValue = max($maxValue, $tick->getClose());
             $minValue = min($minValue, $tick->getClose());
 
-            $minRangeDate = min($minRangeDate, $tick->getCloseTime());
-
             if ($oldMax !== $maxValue)  {
                 $maxTime = $tick->getCloseTime();
                 $maxTime = date('m-d H:i:s', $maxTime / 1000);
+                if ($firstTick->getCloseTime() > $tick->getCloseTime()) {
+                    $tendence = 0;
+                }
+
+                if ($firstTick->getCloseTime() < $tick->getCloseTime()) {
+                    $tendence = 1;
+                }
             }
 
             if ($oldMin !== $minValue)  {
                 $minTime = $tick->getCloseTime();
                 $minTime = date('m-d H:i:s', $minTime / 1000);
             }
+
         }
 
         $percentageChange = $this->percentageChange($minValue, $maxValue);
 
         $direction = null;
-        if ($percentageChange < 0) {
-            $direction = "<options=bold;fg=black;bg=red> NEGATIVE </>";
-            $this->currentTendence = 0;
-        } elseif ($percentageChange > 0) {
+        if ($tendence > 0) {
             $direction = "<options=bold;fg=black;bg=green> POSSITIVE </>";
             $this->currentTendence = 1;
+        } elseif ($tendence < 0) {
+            $direction = "<options=bold;fg=black;bg=red> NEGATIVE </>";
+            $this->currentTendence = 0;
         }
 
         $msg = sprintf("Min/Max[%s/%s] - [%s/%s]: Change: %s - %s",
@@ -344,7 +354,8 @@ class BinanceBot
         array $historyCandleTicks,
         float $percentageChangeWarning,
         float $profitPercentForSell,
-        float $binanceCommisionForTrading
+        float $binanceCommisionForTrading,
+        int $tendenceNeededForBuy
     ): string
     {
         /* @var $lasTick BinanceCandleTick */
@@ -375,7 +386,7 @@ class BinanceBot
         );
 
         if (abs($percentageChange) > $percentageChangeWarning) {
-            if (!$direction && $this->automaticOrder()->canBuy()) {
+            if ($direction === $tendenceNeededForBuy && $this->automaticOrder()->canBuy()) {
                 $this->automaticOrder()->buy(
                     $coin,
                     time(),

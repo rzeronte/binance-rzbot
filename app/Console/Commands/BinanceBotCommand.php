@@ -129,7 +129,8 @@ final class BinanceBotCommand extends Command
                         $candleTicks,
                         $config['options']['realTimeLastTickPercentChangeWarning'],
                         $config['options']['realTimeLastTickProfitPercentage'],
-                        $config['options']['realTimeBinanceCommissionForTrading']
+                        $config['options']['realTimeBinanceCommissionForTrading'],
+                        $config['options']['realTimeTendenceNeededForBuy']
                     );
                 }
 
@@ -186,22 +187,29 @@ final class BinanceBotCommand extends Command
 
         while ($tsCurrentEnd <= $tsTo+60) {
             $output = "";
-            $candleTicks = $this->api->candleTicksCache($tsFrom, $tsCurrentEnd);
 
+            $minMaxStartIn = strtotime(
+                sprintf("-%s minutes", $config['options']['analyzeMinMaxBackRangeInMinutes']),
+                $tsCurrentEnd
+            );
+
+            $candleMinMax = $this->api->candleTicksCache($minMaxStartIn, $tsCurrentEnd);
             if ($config['options']['analyzeMinMaxPercentVerbose']) {
                 $output.= $this->api->searchMinMaxPercentChangeWarnings(
-                    $candleTicks,
+                    $candleMinMax,
                     $config['options']['analyzeMinMaxPercentChange']
                 );
             }
 
+            $candleTicksLastPreviousTick = $this->api->candleTicksCache($tsFrom, $tsCurrentEnd);
             if ($config['options']['analyzeLastTickPercentVerbose']) {
                 $output.= $this->api->searchLastPreviousPercentChangeWarnings(
                     $coin,
-                    $candleTicks,
+                    $candleTicksLastPreviousTick,
                     $config['options']['analyzeLastTickPercentChange'],
                     $config['options']['analyzeProfitPercentage'],
-                    $config['options']['analyzeBinanceCommissionForTrading']
+                    $config['options']['analyzeBinanceCommissionForTrading'],
+                    $config['options']['analyzeTendenceNeededForBuy']
                 );
             }
 
