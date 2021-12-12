@@ -43,60 +43,60 @@ final class BinanceBotCommand extends Command
 
     public function value(string $coin): void
     {
-        $config = $this->api->config('value');
-
-        if ($config['active']) {
-            $this->info(sprintf("Value for %s: %s", $coin, $this->api->price($coin)));
-            $this->info(sprintf("Value 24h ago for %s: %s", $coin, $this->api->prevDayPrice($coin)->getPriceChangePercent()));
+        if (!$this->api->isFeatureActive('value')) {
+            return;
         }
+
+        $this->info(sprintf("Value for %s: %s", $coin, $this->api->price($coin)));
+        $this->info(sprintf("Value 24h ago for %s: %s", $coin, $this->api->prevDayPrice($coin)->getPriceChangePercent()));
     }
 
     public function orders(string $coin): void
     {
-        $config = $this->api->config('orders');
+        if (!$this->api->isFeatureActive('orders')) {
+            return;
+        }
 
-        if ($config['active']) {
-            $orders = $this->api->orders($coin);
-            foreach ($orders as $order) {
-                /* @var $order BinanceOrder */
-                $this->info(sprintf("Order: %s", $order->getSymbol()));
-            }
+        $orders = $this->api->orders($coin);
+        foreach ($orders as $order) {
+            /* @var $order BinanceOrder */
+            $this->info(sprintf("Order: %s", $order->getSymbol()));
         }
     }
 
     public function history(string $coin): void
     {
-        $config = $this->api->config('history');
+        if (!$this->api->isFeatureActive('history')) {
+            return;
+        }
 
-        if ($config['active']) {
-            $operations = $this->api->historyOperations($coin);
-            foreach ($operations as $operation) {
-                /* @var $operation BinanceCoinMyHistoryOperation */
-                $this->info(sprintf("Operation DONE: %s", $operation->getSymbol()));
-            }
+        $operations = $this->api->historyOperations($coin);
+        foreach ($operations as $operation) {
+            /* @var $operation BinanceCoinMyHistoryOperation */
+            $this->info(sprintf("Operation DONE: %s", $operation->getSymbol()));
         }
     }
 
     public function depth(string $coin): void
     {
-        $config = $this->api->config('depth');
-
-        if ($config['active']) {
-            $depth = $this->api->depth($coin);
-            $this->info(sprintf("DEPTH: Bids(%s) / Asks(%s)", $depth->sumBids(), $depth->sumAsks()));
+        if (!$this->api->isFeatureActive('depth')) {
+            return;
         }
+
+        $depth = $this->api->depth($coin);
+        $this->info(sprintf("DEPTH: Bids(%s) / Asks(%s)", $depth->sumBids(), $depth->sumAsks()));
     }
 
     public function openOrders(): void
     {
-        $config = $this->api->config('openOrders');
+        if (!$this->api->isFeatureActive('openOrders')) {
+            return;
+        }
 
-        if ($config['active']) {
-            $openOrders = $this->api->openOrders();
-            foreach ($openOrders as $preOrder) {
-                /* @var $preOrder BinanceOrder */
-                $this->info(sprintf("OPEN Order: %s", $preOrder->getSymbol()));
-            }
+        $openOrders = $this->api->openOrders();
+        foreach ($openOrders as $preOrder) {
+            /* @var $preOrder BinanceOrder */
+            $this->info(sprintf("OPEN Order: %s", $preOrder->getSymbol()));
         }
     }
 
@@ -112,26 +112,26 @@ final class BinanceBotCommand extends Command
             $output = "";
             $candleTicks = $this->api->candleTicks(
                 $coin,
-                $this->api->getOptions('realTime','realTimeCandleTickInterval'),
-                strtotime("-" . $this->api->getOptions('realTime','realTimeMinutesAgo') . " minutes"),
+                $this->api->getOption('realTime','realTimeCandleTickInterval'),
+                strtotime("-" . $this->api->getOption('realTime','realTimeMinutesAgo') . " minutes"),
                 time()
             );
 
-            if ($this->api->getOptions('realTime','realTimeMinMaxPercentVerbose')) {
+            if ($this->api->getOption('realTime','realTimeMinMaxPercentVerbose')) {
                 $output.= $this->api->searchMinMaxPercentChangeWarnings(
                     $candleTicks,
-                    $this->api->getOptions('realTime', 'realTimeMinMaxPercentChangeWarning')
+                    $this->api->getOption('realTime', 'realTimeMinMaxPercentChangeWarning')
                 );
             }
 
-            if ($this->api->getOptions('realTime',['realTimeLastTickPercentVerbose'])) {
+            if ($this->api->getOption('realTime',['realTimeLastTickPercentVerbose'])) {
                 $output.= $this->api->searchLastPreviousPercentChangeWarnings(
                     $coin,
                     $candleTicks,
-                    $this->api->getOptions('realTime','realTimeLastTickPercentChangeWarning'),
-                    $this->api->getOptions('realTime','realTimeLastTickProfitPercentage'),
-                    $this->api->getOptions('realTime','realTimeBinanceCommissionForTrading'),
-                    $this->api->getOptions('realTime','realTimeTendenceNeededForBuy')
+                    $this->api->getOption('realTime','realTimeLastTickPercentChangeWarning'),
+                    $this->api->getOption('realTime','realTimeLastTickProfitPercentage'),
+                    $this->api->getOption('realTime','realTimeBinanceCommissionForTrading'),
+                    $this->api->getOption('realTime','realTimeTendenceNeededForBuy')
                 );
             }
 
@@ -153,8 +153,8 @@ final class BinanceBotCommand extends Command
 
         $this->info("Starting analyze");
 
-        $tsFrom = strtotime($this->api->getOptions('analyze','analyzeStartDate'));
-        $tsTo = strtotime($this->api->getOptions('analyze','analyzeEndDate'));
+        $tsFrom = strtotime($this->api->getOption('analyze','analyzeStartDate'));
+        $tsTo = strtotime($this->api->getOption('analyze','analyzeEndDate'));
 
         $fromDatetime = new DateTime(date("Y-m-d H:i:s",$tsFrom));
         $toDateTime = new DateTime(date("Y-m-d H:i:s", $tsTo));
@@ -180,7 +180,7 @@ final class BinanceBotCommand extends Command
 
         $this->api->candleTicks(
             $coin,
-            $this->api->getOptions('analyze','analyzeCandleTickInterval'),
+            $this->api->getOption('analyze','analyzeCandleTickInterval'),
             $tsFrom,
             $tsTo
         );
@@ -191,34 +191,34 @@ final class BinanceBotCommand extends Command
             $output = "";
 
             $minMaxStartIn = strtotime(
-                sprintf("-%s minutes", $this->api->getOptions('analyze','analyzeMinMaxBackRangeInMinutes')),
+                sprintf("-%s minutes", $this->api->getOption('analyze','analyzeMinMaxBackRangeInMinutes')),
                 $tsCurrentEnd
             );
 
             $candleMinMax = $this->api->candleTicksCache($minMaxStartIn, $tsCurrentEnd);
-            if ($this->api->getOptions('analyze', 'analyzeMinMaxPercentVerbose')) {
+            if ($this->api->getOption('analyze', 'analyzeMinMaxPercentVerbose')) {
                 $output.= $this->api->searchMinMaxPercentChangeWarnings(
                     $candleMinMax,
-                    $this->api->getOptions('analyze','analyzeMinMaxPercentChange')
+                    $this->api->getOption('analyze','analyzeMinMaxPercentChange')
                 );
             }
 
             $candleTicksLastPreviousTick = $this->api->candleTicksCache($tsFrom, $tsCurrentEnd);
-            if ($this->api->getOptions('analyze', 'analyzeLastTickPercentVerbose')) {
+            if ($this->api->getOption('analyze', 'analyzeLastTickPercentVerbose')) {
                 $output.= $this->api->searchLastPreviousPercentChangeWarnings(
                     $coin,
                     $candleTicksLastPreviousTick,
-                    $this->api->getOptions('analyze','analyzeLastTickPercentChange'),
-                    $this->api->getOptions('analyze','analyzeProfitPercentage'),
-                    $this->api->getOptions('analyze','analyzeBinanceCommissionForTrading'),
-                    $this->api->getOptions('analyze','analyzeTendenceNeededForBuy')
+                    $this->api->getOption('analyze','analyzeLastTickPercentChange'),
+                    $this->api->getOption('analyze','analyzeProfitPercentage'),
+                    $this->api->getOption('analyze','analyzeBinanceCommissionForTrading'),
+                    $this->api->getOption('analyze','analyzeTendenceNeededForBuy')
                 );
             }
 
             $this->line(sprintf("[%s] %s", $this->api->getCurrentTime(), $output));
             $tsCurrentEnd += 60;
 
-            usleep($this->api->getOptions('analyze','analyzeSleepTime') * 1000000);
+            usleep($this->api->getOption('analyze','analyzeSleepTime') * 1000000);
         }
 
         $this->separator();
@@ -232,7 +232,6 @@ final class BinanceBotCommand extends Command
 
     private function separator()
     {
-
         $this->info(str_repeat( "=", 80));
     }
 }

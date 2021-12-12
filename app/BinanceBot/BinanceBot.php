@@ -285,7 +285,7 @@ class BinanceBot
         return $this->config[$key]['active'] ?? false;
     }
 
-    public function getOptions(string $key, $option)
+    public function getOption(string $key, $option)
     {
         return $this->config[$key]['options'][$option] ?? null;
     }
