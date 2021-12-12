@@ -102,57 +102,59 @@ final class BinanceBotCommand extends Command
 
     private function realTime(string $coin)
     {
+        if (!$this->api->isFeatureActive('realTime')) {
+            return;
+        }
+
         $this->info("Starting realTime");
 
-        $config = $this->api->config('realTime');
+        while (true) {
+            $output = "";
+            $candleTicks = $this->api->candleTicks(
+                $coin,
+                $this->api->getOptions('realTime','realTimeCandleTickInterval'),
+                strtotime("-" . $this->api->getOptions('realTime','realTimeMinutesAgo') . " minutes"),
+                time()
+            );
 
-        if ($config['active']) {
-            while (true) {
-                $output = "";
-                $candleTicks = $this->api->candleTicks(
-                    $coin,
-                    $config['options']['realTimeCandleTickInterval'],
-                    strtotime("-" . $config['options']['realTimeMinutesAgo'] . " minutes"),
-                    time()
+            if ($this->api->getOptions('realTime','realTimeMinMaxPercentVerbose')) {
+                $output.= $this->api->searchMinMaxPercentChangeWarnings(
+                    $candleTicks,
+                    $this->api->getOptions('realTime', 'realTimeMinMaxPercentChangeWarning')
                 );
-
-                if ($config['options']['realTimeMinMaxPercentVerbose']) {
-                    $output.= $this->api->searchMinMaxPercentChangeWarnings(
-                        $candleTicks,
-                        $config['options']['realTimeMinMaxPercentChangeWarning']
-                    );
-                }
-
-                if ($config['options']['realTimeLastTickPercentVerbose']) {
-                    $output.= $this->api->searchLastPreviousPercentChangeWarnings(
-                        $coin,
-                        $candleTicks,
-                        $config['options']['realTimeLastTickPercentChangeWarning'],
-                        $config['options']['realTimeLastTickProfitPercentage'],
-                        $config['options']['realTimeBinanceCommissionForTrading'],
-                        $config['options']['realTimeTendenceNeededForBuy']
-                    );
-                }
-
-                $this->line(sprintf("[%s] %s %s",
-                    $this->api->getCurrentTime(),
-                    $coin,
-                    $output
-                ));
-
-                sleep(self::REAL_TIME_WAIT_SECONDS);
             }
+
+            if ($this->api->getOptions('realTime',['realTimeLastTickPercentVerbose'])) {
+                $output.= $this->api->searchLastPreviousPercentChangeWarnings(
+                    $coin,
+                    $candleTicks,
+                    $this->api->getOptions('realTime','realTimeLastTickPercentChangeWarning'),
+                    $this->api->getOptions('realTime','realTimeLastTickProfitPercentage'),
+                    $this->api->getOptions('realTime','realTimeBinanceCommissionForTrading'),
+                    $this->api->getOptions('realTime','realTimeTendenceNeededForBuy')
+                );
+            }
+
+            $this->line(sprintf("[%s] %s %s",
+                $this->api->getCurrentTime(),
+                $coin,
+                $output
+            ));
+
+            sleep(self::REAL_TIME_WAIT_SECONDS);
         }
     }
 
     private function analyze(string $coin)
     {
+        if (!$this->api->isFeatureActive('analyze')) {
+            return;
+        }
+
         $this->info("Starting analyze");
 
-        $config = $this->api->config('analyze');
-
-        $tsFrom = strtotime($config['options']['analyzeStartDate']);
-        $tsTo = strtotime($config['options']['analyzeEndDate']);
+        $tsFrom = strtotime($this->api->getOptions('analyze','analyzeStartDate'));
+        $tsTo = strtotime($this->api->getOptions('analyze','analyzeEndDate'));
 
         $fromDatetime = new DateTime(date("Y-m-d H:i:s",$tsFrom));
         $toDateTime = new DateTime(date("Y-m-d H:i:s", $tsTo));
@@ -178,7 +180,7 @@ final class BinanceBotCommand extends Command
 
         $this->api->candleTicks(
             $coin,
-            $config['options']['analyzeCandleTickInterval'],
+            $this->api->getOptions('analyze','analyzeCandleTickInterval'),
             $tsFrom,
             $tsTo
         );
@@ -189,34 +191,34 @@ final class BinanceBotCommand extends Command
             $output = "";
 
             $minMaxStartIn = strtotime(
-                sprintf("-%s minutes", $config['options']['analyzeMinMaxBackRangeInMinutes']),
+                sprintf("-%s minutes", $this->api->getOptions('analyze','analyzeMinMaxBackRangeInMinutes')),
                 $tsCurrentEnd
             );
 
             $candleMinMax = $this->api->candleTicksCache($minMaxStartIn, $tsCurrentEnd);
-            if ($config['options']['analyzeMinMaxPercentVerbose']) {
+            if ($this->api->getOptions('analyze', 'analyzeMinMaxPercentVerbose')) {
                 $output.= $this->api->searchMinMaxPercentChangeWarnings(
                     $candleMinMax,
-                    $config['options']['analyzeMinMaxPercentChange']
+                    $this->api->getOptions('analyze','analyzeMinMaxPercentChange')
                 );
             }
 
             $candleTicksLastPreviousTick = $this->api->candleTicksCache($tsFrom, $tsCurrentEnd);
-            if ($config['options']['analyzeLastTickPercentVerbose']) {
+            if ($this->api->getOptions('analyze', 'analyzeLastTickPercentVerbose')) {
                 $output.= $this->api->searchLastPreviousPercentChangeWarnings(
                     $coin,
                     $candleTicksLastPreviousTick,
-                    $config['options']['analyzeLastTickPercentChange'],
-                    $config['options']['analyzeProfitPercentage'],
-                    $config['options']['analyzeBinanceCommissionForTrading'],
-                    $config['options']['analyzeTendenceNeededForBuy']
+                    $this->api->getOptions('analyze','analyzeLastTickPercentChange'),
+                    $this->api->getOptions('analyze','analyzeProfitPercentage'),
+                    $this->api->getOptions('analyze','analyzeBinanceCommissionForTrading'),
+                    $this->api->getOptions('analyze','analyzeTendenceNeededForBuy')
                 );
             }
 
             $this->line(sprintf("[%s] %s", $this->api->getCurrentTime(), $output));
             $tsCurrentEnd += 60;
 
-            usleep($config['options']['analyzeSleepTime'] * 1000000);
+            usleep($this->api->getOptions('analyze','analyzeSleepTime') * 1000000);
         }
 
         $this->separator();

@@ -280,6 +280,16 @@ class BinanceBot
         return $this->config[$key] ?? null;
     }
 
+    public function isFeatureActive(string $key): bool
+    {
+        return $this->config[$key]['active'] ?? false;
+    }
+
+    public function getOptions(string $key, $option)
+    {
+        return $this->config[$key]['options'][$option] ?? null;
+    }
+
     public function searchMinMaxPercentChangeWarnings(
         array $historyCandleTicks,
         float $percentChangeWarning
